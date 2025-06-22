@@ -1,30 +1,36 @@
-# ai_response.py
-import ollama
+from ollama import chat
 
-def get_ai_recommendation(name, interests, strengths, careers):
+def get_ai_recommendation(question, scores):
+    # Dynamically create the profile string from the scores dictionary
+    profile = "User profile:\n"
+    for trait, value in scores.items():
+        profile += f"- {trait}: {value}/5\n"
+
+    # Construct the AI prompt
     prompt = f"""
-    You are an expert career counsellor.
-    Based on the following inputs:
-    - Name: {name}
-    - Interests: {interests}
-    - Strengths: {strengths}
-    - Career Paths: {', '.join(careers)}
-    Provide a detailed and personalized career guidance summary in a friendly tone.
-    """
+You are a professional career counsellor.
 
-    try:
-        response = ollama.chat(
-            model='llama3',
-            messages=[{'role': 'user', 'content': prompt}]
-        )
-        # Extract the generated text
-        return response['message']['content']
+Based on this user profile and question, suggest 3 suitable career paths.
+Give a short reason for each and clearly mention one recommended career at the end.
 
-    except Exception as e:
-        # Log or print the error if you want
-        print(f"⚠️ Ollama error: {e}")
-        # Return a safe fallback message
-        return (
-            "⚠️ Sorry, I couldn't generate a recommendation right now. "
-            "Please try again in a moment."
-        )
+{profile}
+
+User Question: {question}
+"""
+
+    # Call the Ollama LLaMA 3 model
+    response = chat(model='llama3', messages=[
+        {"role": "system", "content": "You are a helpful AI career advisor."},
+        {"role": "user", "content": prompt}
+    ])
+
+    reply = response["message"]["content"]
+
+    # Extract the recommended career if mentioned explicitly
+    recommended = "General"
+    for line in reply.splitlines():
+        if "recommended" in line.lower():
+            recommended = line.split(":")[-1].strip()
+            break
+
+    return reply, recommended

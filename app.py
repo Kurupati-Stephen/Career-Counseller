@@ -1,69 +1,108 @@
 import streamlit as st
-from ollama import chat  # Make sure ollama is installed and running
+from ai_response import get_ai_recommendation
+from chart import plot_scores
+from fpdf import FPDF
+from action_plan import get_action_plan
+from email.message import EmailMessage
+from deep_translator import GoogleTranslator
+import smtplib
 
-st.set_page_config(page_title="AI Career Counsellor", layout="centered")
+# --- Page Config & Logo ---
+st.set_page_config(page_title="AI Career Counsellor", page_icon="🎓")
+st.image("https://i.imgur.com/9XnL5nH.png", width=100)
+st.title("🎓 AI Career Counsellor")
+st.markdown("Empowering your future, one suggestion at a time!")
 
-st.title("🎯 AI Career Counsellor")
-st.markdown("Answer a few questions and get personalized career guidance powered by AI!")
+# --- Assessment Section ---
+with st.expander("📝 Take a quick assessment (optional but improves accuracy)"):
+    tech = st.slider("Your interest in technology?", 1, 5, 3)
+    comm = st.slider("Your communication skills?", 1, 5, 3)
+    lead = st.slider("How well do you handle leadership tasks?", 1, 5, 3)
+    create = st.slider("Your creativity level?", 1, 5, 3)
+    logic = st.slider("How logical are you in solving problems?", 1, 5, 3)
+    scores = {
+        "Tech": tech,
+        "Communication": comm,
+        "Leadership": lead,
+        "Creativity": create,
+        "Logic": logic
+    }
 
-# --- Input Form ---
-with st.form("career_form"):
-    name = st.text_input("👤 Name")
-    age = st.number_input("🎂 Age", min_value=10, max_value=100, step=1)
-    qualification = st.selectbox("🎓 Highest Qualification", 
-                                 ["High School", "Diploma", "Bachelor's", "Master's", "PhD"])
-    field = st.selectbox("💼 Field of Interest", 
-                         ["Software Development", "Data Science", "AI/ML", "Cybersecurity", 
-                          "Networking", "Cloud Computing", "Digital Marketing", "Design", "Other"])
-    experience = st.slider("📊 Years of Experience", 0, 20, 0)
-    skills = st.text_area("🛠️ List Your Key Skills (comma-separated)")
-    work_style = st.radio("🏢 Preferred Work Style", ["Remote", "On-site", "Hybrid"])
-    goals = st.text_area("🎯 Career Goals")
-    location = st.text_input("📍 Preferred Job Location (Optional)")
+# --- Input Section ---
+user_input = st.text_area("💬 Ask your career question:")
+email = st.text_input("📧 Enter your email (optional, for sending result):")
 
-    st.markdown("### 🧠 Self-Evaluation (Rate Yourself 1–5):")
-    logical = st.slider("🔢 Logical Thinking", 1, 5, 3)
-    creative = st.slider("🎨 Creativity", 1, 5, 3)
-    empathy = st.slider("🤝 Empathy", 1, 5, 3)
-    leadership = st.slider("🗣️ Leadership", 1, 5, 3)
-    tech_comfort = st.slider("💻 Comfort with Technology", 1, 5, 3)
+# --- Language Selection ---
+lang_choice = st.selectbox("🌍 Choose a language:", ["English", "Telugu", "Hindi"])
 
-    submitted = st.form_submit_button("🚀 Get Career Recommendations")
-
-# --- On Submit ---
-if submitted:
-    if name.strip() == "" or goals.strip() == "":
-        st.warning("⚠️ Please fill in all required fields.")
+# --- Button Click Action ---
+if st.button("Get Advice"):
+    if not user_input.strip():
+        st.warning("Please enter your question.")
     else:
-        # Combine user input into a prompt
-        user_prompt = f"""
-        I'm {name}, {age} years old, with a qualification of {qualification}. 
-        I'm interested in {field}. I have {experience} years of experience. 
-        My key skills include: {skills}. I prefer {work_style} work.
-        My career goals are: {goals}.
-        Preferred job location: {location if location else 'not specified'}.
+        with st.spinner("AI is thinking..."):
+            ai_response, career_name = get_ai_recommendation(user_input, scores)
 
-        Here is my self-evaluation:
-        - Logical Thinking: {logical}/5
-        - Creativity: {creative}/5
-        - Empathy: {empathy}/5
-        - Leadership: {leadership}/5
-        - Comfort with Technology: {tech_comfort}/5
+            # Translate if needed
+            if lang_choice != "English":
+                lang_code = "te" if lang_choice == "Telugu" else "hi"
+                ai_response = GoogleTranslator(source="auto", target=lang_code).translate(ai_response)
 
-        Based on this, suggest:
-        1. Top 3 career roles
-        2. Description of each role
-        3. Skills/tools required
-        4. Courses or certifications to take
-        5. Any additional career tips.
-        Format the response with bullet points and clear headings.
-        """
+            # Display response
+            st.success("🧠 Recommendation:")
+            st.markdown(ai_response)
 
-        with st.spinner("⏳ AI is thinking... this may take a few seconds"):
+            # --- Chart Display ---
+            st.pyplot(plot_scores(scores))
+
+            # --- Action Plan ---
+            st.subheader("📌 Your Action Plan:")
             try:
-                response = chat(model="llama3", messages=[{"role": "user", "content": user_prompt}])
-                answer = response["message"]["content"]
-                st.success("✅ Here are your personalized career recommendations:")
-                st.markdown(answer)
-            except Exception as e:
-                st.error(f"❌ Error generating response: {e}")
+                plan = get_action_plan(career_name)
+            except Exception:
+                plan = get_action_plan("General")
+
+            for step in plan:
+                st.checkbox(step)
+
+            # --- PDF DOWNLOAD ---
+            if st.button("📄 Download as PDF"):
+                pdf = FPDF()
+                pdf.add_page()
+                pdf.set_font("Arial", size=12)
+                pdf.multi_cell(0, 10, f"AI Career Counsellor Recommendation:\n\n{ai_response}\n\nScores: {scores}\n")
+                pdf.output("career_recommendation.pdf")
+                with open("career_recommendation.pdf", "rb") as file:
+                    st.download_button("📅 Download PDF", file, "Career_Advice.pdf")
+
+            # --- EMAIL FEATURE ---
+            if email:
+                try:
+                    msg = EmailMessage()
+                    msg['Subject'] = "Your Career Counsellor Advice"
+                    msg['From'] = st.secrets["EMAIL"]
+                    msg['To'] = email
+                    msg.set_content(f"Here is your AI Career Counsellor recommendation:\n\n{ai_response}")
+
+                    server = smtplib.SMTP("smtp.gmail.com", 587)
+                    server.starttls()
+                    server.login(st.secrets["EMAIL"], st.secrets["EMAIL_PASSWORD"])
+                    server.send_message(msg)
+                    server.quit()
+                    st.success("📬 Recommendation sent to your email!")
+                except Exception as e:
+                    st.error(f"Failed to send email: {e}")
+
+            # --- Gamification Badge ---
+            if all(v >= 4 for v in scores.values()):
+                st.balloons()
+                st.success("🌼 Badge Unlocked: Multi-Talent Explorer!")
+
+            # --- Chat Log ---
+            if "history" not in st.session_state:
+                st.session_state.history = []
+            st.session_state.history.append({"q": user_input, "a": ai_response})
+
+            st.subheader("📜 Conversation History")
+            for item in st.session_state.history:
+                st.markdown(f"**Q:** {item['q']}  \n**A:** {item['a']}")
